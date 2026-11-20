@@ -1,12 +1,13 @@
 
-name: Build NestCam Phone and Watch8
+name: Build NestCam Phone Watch8
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -16,38 +17,50 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Unzip source
-        run: |
-          mkdir -p source
-          ZIP=$(find . -maxdepth 1 -type f -name '*.zip' | head -1)
-          if [ -z "$ZIP" ]; then
-            echo "ZIP file not found"
-            exit 1
-          fi
-          unzip -q "$ZIP" -d source
-          test -f source/settings.gradle
-
-      - name: Set up Java 17
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK
-        run: |
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
-
-      - name: Set up Gradle
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
 
-      - name: Build Phone and Watch APK
+      - name: Unzip Source
+        shell: bash
         run: |
-          gradle -p source \
+          ZIP=$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)
+          if [ -z "$ZIP" ]; then
+            echo "ZIP not found"
+            exit 1
+          fi
+          mkdir -p source
+          unzip -q "$ZIP" -d source
+          SETTINGS=$(find source -name settings.gradle -print -quit)
+          if [ -z "$SETTINGS" ]; then
+            echo "settings.gradle not found"
+            exit 1
+          fi
+          echo "PROJECT_DIR=$(dirname "$SETTINGS")" >> "$GITHUB_ENV"
+
+      - name: Check Android SDK
+        shell: bash
+        run: |
+          echo "Android SDK: $ANDROID_HOME"
+          if [ ! -d "$ANDROID_HOME/platforms/android-35" ] || \
+             [ ! -d "$ANDROID_HOME/build-tools/35.0.0" ]; then
+            yes | sdkmanager --licenses > /dev/null || true
+            sdkmanager --install \
+              "platforms;android-35" \
+              "build-tools;35.0.0"
+          fi
+
+      - name: Build Phone and Watch8
+        shell: bash
+        run: |
+          gradle -p "$PROJECT_DIR" \
             :mobile:assembleDebug \
             :wear:assembleDebug \
             --no-daemon --stacktrace
@@ -56,12 +69,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: NestCam-Phone-APK
-          path: source/mobile/build/outputs/apk/debug/*.apk
+          path: ${{ env.PROJECT_DIR }}/mobile/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
       - name: Upload Watch8 APK
         uses: actions/upload-artifact@v4
         with:
           name: NestCam-Watch8-APK
-          path: source/wear/build/outputs/apk/debug/*.apk
+          path: ${{ env.PROJECT_DIR }}/wear/build/outputs/apk/debug/*.apk
           if-no-files-found: error
